@@ -80,20 +80,40 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// 🩹 Forgot password (demo only)
+// 🩹 Forgot password
 router.post("/forgot-password", async (req, res) => {
-  try {
-    const { email, newPassword } = req.body;
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(404).json({ message: "User not found" });
+  const { email } = req.body;
 
-    user.password = newPassword;
-    await user.save();
-    res.json({ message: "Password updated successfully" });
-  } catch (err) {
-    console.error("Forgot password error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  const token = crypto.randomBytes(32).toString("hex");
+
+  user.resetToken = token;
+  user.resetTokenExpiry = Date.now() + 15 * 60 * 1000; // 15 min
+  await user.save();
+  const protocol = req.protocol;
+  const host = req.get("host");
+  const resetLink = `${protocol}://${host}/reset-password/${token}`;
+  await sendEmail(email, resetLink);
+
+  res.json({ message: "Reset link sent to your email" });
+});
+router.post("/reset-password/:token", async (req, res) => {
+  const user = await User.findOne({
+    resetToken: req.params.token,
+    resetTokenExpiry: { $gt: Date.now() },
+  });
+
+  if (!user) return res.status(400).json({ message: "Invalid token" });
+
+  user.password = await bcrypt.hash(req.body.password, 10);
+  user.resetToken = null;
+  user.resetTokenExpiry = null;
+
+  await user.save();
+
+  res.json({ message: "Password reset successful" });
 });
 
 module.exports = router;
