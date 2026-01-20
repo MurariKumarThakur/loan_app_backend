@@ -82,23 +82,36 @@ router.post("/login", async (req, res) => {
 
 // 🩹 Forgot password
 router.post("/forgot-password", async (req, res) => {
-  const { email } = req.body;
+  try {
+    const { email } = req.body;
 
-  const user = await User.findOne({ email });
-  if (!user) return res.status(404).json({ message: "User not found" });
+    const user = await User.findOne({ email });
+    if (!user)
+      return res.json({
+        message: "If this email exists, a reset link has been sent.",
+      });
 
-  const token = crypto.randomBytes(32).toString("hex");
+    const token = crypto.randomBytes(32).toString("hex");
 
-  user.resetToken = token;
-  user.resetTokenExpiry = Date.now() + 15 * 60 * 1000; // 15 min
-  await user.save();
-  const protocol = req.protocol;
-  const host = req.get("host");
-  const resetLink = `${protocol}://${host}/reset-password/${token}`;
-  await sendEmail(email, resetLink);
+    user.resetToken = token;
+    user.resetTokenExpiry = Date.now() + 15 * 60 * 1000;
 
-  res.json({ message: "Reset link sent to your email" });
+    // 🔥 Important fix
+    await user.save({ validateBeforeSave: false });
+
+    const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+    const host = req.get("host");
+    const resetLink = `${protocol}://${host}/reset-password/${token}`;
+
+    await sendEmail(email, resetLink);
+
+    res.json({ message: "Reset link sent to your email" });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
 });
+
 router.post("/reset-password/:token", async (req, res) => {
   const user = await User.findOne({
     resetToken: req.params.token,

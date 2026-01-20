@@ -5,13 +5,39 @@ const bcrypt = require("bcryptjs");
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
+
     phone: { type: String },
-    email: { type: String, required: true, unique: true, lowercase: true },
-    password: { type: String, required: true },
-    role: { type: String, enum: ["admin", "user"], default: "user" },
+
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+    },
+
+    password: {
+      type: String,
+      required: true,
+    },
+
+    role: {
+      type: String,
+      enum: ["admin", "user"],
+      default: "user",
+    },
+
+    resetToken: {
+      type: String,
+    },
+
+    resetTokenExpiry: {
+      type: Date, // 🔥 should be Date, not String
+    },
   },
   { timestamps: true }
 );
+
+module.exports = mongoose.model("User", userSchema);
 
 // hash password before save
 userSchema.pre("save", async function (next) {
