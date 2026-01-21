@@ -15,7 +15,7 @@ async function createAdmin() {
   });
 
   await admin.save();
-  console.log("✅ Admin user created successfully!");
+  //console.log("✅ Admin user created successfully!");
   mongoose.connection.close();
 }
 

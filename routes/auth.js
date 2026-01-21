@@ -4,6 +4,9 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { protect, admin } = require("../middleware/auth");
+const crypto = require("crypto");
+const sendEmail = require("../utils/sendEmail");
+const bcrypt = require("bcrypt");
 
 // 🔐 Helper to sign token
 const generateToken = (id, role) =>
@@ -98,13 +101,8 @@ router.post("/forgot-password", async (req, res) => {
 
     // 🔥 Important fix
     await user.save({ validateBeforeSave: false });
-
-    const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-    const host = req.get("host");
-    const resetLink = `${protocol}://${host}/reset-password/${token}`;
-
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password/${token}`;
     await sendEmail(email, resetLink);
-
     res.json({ message: "Reset link sent to your email" });
   } catch (err) {
     console.error("Forgot password error:", err);
