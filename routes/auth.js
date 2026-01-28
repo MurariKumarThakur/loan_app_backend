@@ -43,7 +43,8 @@ router.post("/register", protect, admin, async (req, res) => {
         email: user.email,
         role: user.role,
       },
-      token: generateToken(user._id, user.role), // ✅ return token
+
+      // token: generateToken(user._id, user.role), // ✅ return token
     });
   } catch (err) {
     console.error("Register error:", err);
@@ -98,11 +99,19 @@ router.post("/forgot-password", async (req, res) => {
 
     user.resetToken = token;
     user.resetTokenExpiry = Date.now() + 15 * 60 * 1000;
-
     // 🔥 Important fix
     await user.save({ validateBeforeSave: false });
     const resetLink = `${process.env.FRONTEND_URL}/reset-password/${token}`;
-    await sendEmail(email, resetLink);
+    await sendEmail({
+      to: email,
+      subject: "Reset Your Password - MyLoanApp",
+      html: `
+        <h3>Password Reset</h3>
+        <p>Click the link below to reset your password:</p>
+        <a href="${resetLink}">${resetLink}</a>
+        <p>This link expires in 15 minutes.</p>
+      `,
+    });
     res.json({ message: "Reset link sent to your email" });
   } catch (err) {
     console.error("Forgot password error:", err);

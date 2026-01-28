@@ -1,26 +1,23 @@
-const nodemailer = require("nodemailer");
+const sgMail = require("@sendgrid/mail");
 
-const sendEmail = async (to, resetLink) => {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-  });
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to,
-    subject: "Password Reset",
-    html: `
-      <p>Click the link below to reset your password:</p>
-      <a href="${resetLink}">${resetLink}</a>
-      <p>This link is valid for 15 minutes.</p>
-    `,
-  };
-
-  await transporter.sendMail(mailOptions);
+const sendEmail = async ({ to, subject, html }) => {
+  try {
+    await sgMail.send({
+      to,
+      from: {
+        email: process.env.SENDGRID_FROM_EMAIL,
+        name: "MyLoanApp",
+      },
+      subject,
+      html,
+    });
+    //  console.log("✅ Email sent to:", to);
+  } catch (error) {
+    console.error("❌ SendGrid Error:", error.response?.body || error.message);
+    throw new Error("Email sending failed");
+  }
 };
 
-module.exports = sendEmail; // ✅ IMPORTANT
+module.exports = sendEmail;
