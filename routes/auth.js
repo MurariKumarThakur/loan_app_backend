@@ -127,7 +127,7 @@ router.post("/reset-password/:token", async (req, res) => {
 
   if (!user) return res.status(400).json({ message: "Invalid token" });
 
-  user.password = await bcrypt.hash(req.body.password, 10);
+  user.password = req.body.password;
   user.resetToken = null;
   user.resetTokenExpiry = null;
 
