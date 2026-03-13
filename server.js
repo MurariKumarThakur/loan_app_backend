@@ -4,8 +4,8 @@ const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/auth");
-const loanRoutes = require("./routes/LoanRoute");
-const transactionRoutes = require("./routes/TransactionRoutes");
+const loanRoutes = require("./routes/loans");
+const transactionRoutes = require("./routes/transactions");
 const app = express();
 connectDB();
 

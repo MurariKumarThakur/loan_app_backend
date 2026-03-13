@@ -1,139 +1,154 @@
-// routes/auth.js
 const express = require("express");
 const router = express.Router();
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-const { protect, admin } = require("../middleware/auth");
-const crypto = require("crypto");
 const sendEmail = require("../utils/sendEmail");
-const bcrypt = require("bcrypt");
+const { protect, admin } = require("../middleware/auth");
+const { asyncHandler } = require("../middleware/errorHandler");
 
-// 🔐 Helper to sign token
+// ── Helpers ───────────────────────────────────────────────────
 const generateToken = (id, role) =>
-  jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: "1d" });
+  jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
-// 🧩 Admin route: register new user (admin-only)
-router.post("/register", protect, admin, async (req, res) => {
-  try {
+const safeUser = (u) => ({ id: u._id, name: u.name, email: u.email, role: u.role, phone: u.phone });
+
+// ── POST /api/auth/register  (admin only) ─────────────────────
+router.post(
+  "/register",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
     const { name, email, phone, password, role } = req.body;
 
-    if (!name || !email || !password) {
-      return res
-        .status(400)
-        .json({ message: "Name, email, and password are required" });
-    }
+    if (!name || !email || !password)
+      return res.status(400).json({ message: "Name, email and password are required" });
 
-    const existing = await User.findOne({ email: email.toLowerCase() });
-    if (existing)
-      return res.status(400).json({ message: "User already exists" });
+    if (await User.findOne({ email: email.toLowerCase() }))
+      return res.status(400).json({ message: "Email already in use" });
 
     const user = await User.create({
-      name,
-      email: email.toLowerCase(),
-      phone,
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      phone: phone?.trim(),
       password,
-      role: role || "user",
+      role: role === "admin" ? "admin" : "user",
     });
 
-    res.status(201).json({
-      message: "User created successfully",
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+    res.status(201).json({ message: "User created successfully", user: safeUser(user) });
+  })
+);
 
-      // token: generateToken(user._id, user.role), // ✅ return token
-    });
-  } catch (err) {
-    console.error("Register error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-// 🧾 Public Login route
-router.post("/login", async (req, res) => {
-  try {
+// ── POST /api/auth/login ──────────────────────────────────────
+router.post(
+  "/login",
+  asyncHandler(async (req, res) => {
     const { email, password } = req.body;
+
     if (!email || !password)
-      return res.status(400).json({ message: "Email and password required" });
+      return res.status(400).json({ message: "Email and password are required" });
 
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user)
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+    // Same response for "no user" and "wrong password" — prevents email enumeration
+    if (!user || !(await user.matchPassword(password)))
       return res.status(401).json({ message: "Invalid email or password" });
 
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch)
-      return res.status(401).json({ message: "Invalid email or password" });
+    res.json({ user: safeUser(user), token: generateToken(user._id, user.role) });
+  })
+);
 
-    const token = generateToken(user._id, user.role);
+// ── GET /api/auth/me ──────────────────────────────────────────
+router.get(
+  "/me",
+  protect,
+  asyncHandler(async (req, res) => {
+    res.json({ user: safeUser(req.user) });
+  })
+);
 
-    res.json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      token, // ✅ token now included properly
-    });
-  } catch (err) {
-    console.error("Login error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-// 🩹 Forgot password
-router.post("/forgot-password", async (req, res) => {
-  try {
+// ── POST /api/auth/forgot-password ───────────────────────────
+router.post(
+  "/forgot-password",
+  asyncHandler(async (req, res) => {
     const { email } = req.body;
+    if (!email) return res.status(400).json({ message: "Email is required" });
 
-    const user = await User.findOne({ email });
-    if (!user)
-      return res.json({
-        message: "If this email exists, a reset link has been sent.",
-      });
+    // Always return same message — prevents email enumeration
+    const genericOk = { message: "If this email exists, a reset link has been sent." };
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) return res.json(genericOk);
 
     const token = crypto.randomBytes(32).toString("hex");
-
     user.resetToken = token;
-    user.resetTokenExpiry = Date.now() + 15 * 60 * 1000;
-    // 🔥 Important fix
+    user.resetTokenExpiry = Date.now() + 15 * 60 * 1000; // 15 min
     await user.save({ validateBeforeSave: false });
+
     const resetLink = `${process.env.FRONTEND_URL}/reset-password/${token}`;
+
     await sendEmail({
-      to: email,
-      subject: "Reset Your Password - MyLoanApp",
+      to: user.email,
+      subject: "Reset Your Password — MyLoanApp",
       html: `
-        <h3>Password Reset</h3>
-        <p>Click the link below to reset your password:</p>
-        <a href="${resetLink}">${resetLink}</a>
-        <p>This link expires in 15 minutes.</p>
+        <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;background:#0f0f14;color:#f0ece0;border-radius:12px">
+          <h2 style="color:#c9a84c;margin-top:0">Password Reset Request</h2>
+          <p>Hi <strong>${user.name}</strong>,</p>
+          <p>Click the button below to reset your password. This link expires in <strong>15 minutes</strong>.</p>
+          <a href="${resetLink}"
+             style="display:inline-block;margin:24px 0;padding:12px 28px;background:linear-gradient(135deg,#c9a84c,#e8c96a);color:#000;font-weight:700;text-decoration:none;border-radius:8px">
+            Reset Password
+          </a>
+          <p style="font-size:13px;color:#888">Or copy this link:<br>
+            <a href="${resetLink}" style="color:#c9a84c;word-break:break-all">${resetLink}</a>
+          </p>
+          <hr style="border-color:#333;margin:24px 0">
+          <p style="font-size:12px;color:#666">If you didn't request this, you can safely ignore this email.</p>
+        </div>
       `,
     });
-    res.json({ message: "Reset link sent to your email" });
-  } catch (err) {
-    console.error("Forgot password error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
 
-router.post("/reset-password/:token", async (req, res) => {
-  const user = await User.findOne({
-    resetToken: req.params.token,
-    resetTokenExpiry: { $gt: Date.now() },
-  });
+    res.json(genericOk);
+  })
+);
 
-  if (!user) return res.status(400).json({ message: "Invalid token" });
+// ── POST /api/auth/reset-password/:token ─────────────────────
+router.post(
+  "/reset-password/:token",
+  asyncHandler(async (req, res) => {
+    const { password } = req.body;
 
-  user.password = req.body.password;
-  user.resetToken = null;
-  user.resetTokenExpiry = null;
+    if (!password || password.length < 6)
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
 
-  await user.save();
+    const user = await User.findOne({
+      resetToken: req.params.token,
+      resetTokenExpiry: { $gt: Date.now() },
+    });
 
-  res.json({ message: "Password reset successful" });
-});
+    if (!user)
+      return res.status(400).json({ message: "Reset link is invalid or has expired" });
+
+    user.password = password;
+    user.resetToken = undefined;
+    user.resetTokenExpiry = undefined;
+    await user.save();
+
+    res.json({ message: "Password reset successful. You can now log in." });
+  })
+);
+
+// ── GET /api/auth/users  (admin only) ────────────────────────
+router.get(
+  "/users",
+  protect,
+  admin,
+  asyncHandler(async (req, res) => {
+    const users = await User.find()
+      .select("-password -resetToken -resetTokenExpiry")
+      .sort({ createdAt: -1 });
+    res.json(users);
+  })
+);
 
 module.exports = router;
